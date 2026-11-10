@@ -1,8 +1,8 @@
 # dsh-think-fold
 
-Automatically expands the row that is currently running — the official Think row and the official tool cards — and folds it back when it settles. When a turn finishes, that whole turn's process rows merge into the built-in "processed" header, so only the final answer stays on screen.
+Automatically expands the row that is currently running — the official Think row and the official tool cards — and folds it back when it settles. When a turn finishes, that whole turn's process rows merge into the built-in "processed" header, narration included, so only the final answer stays on screen.
 
-Client-only and zero custom rendering: no self-made container, no stylesheet, no Markdown re-implementation. Layout, font sizes, code blocks, diffs and images are all the official ones. The plugin makes exactly one kind of write to the page — dispatching a single `click` on the official `[data-disclosure-row]` — and decides what is running purely from the state the official UI already publishes (`data-state`), never from timers or heuristics. Rows you opened or closed by hand are recorded and never touched again, and uninstalling restores the transcript view level it changed.
+Client-only and zero custom rendering: no self-made container, no stylesheet, no Markdown re-implementation. Layout, font sizes, code blocks, diffs and images are all the official ones. The plugin makes exactly one kind of write to the page — dispatching a single `click` on the official `[data-disclosure-row]` — and decides what is running purely from the state the official UI already publishes (`data-state`), never from timers or heuristics. Rows you opened or closed by hand are recorded and never touched again, and uninstalling restores the official settings it changed.
 
 ---
 
@@ -22,7 +22,7 @@ Client-only and zero custom rendering: no self-made container, no stylesheet, no
 | 工具执行完 | 那张工具卡收回官方的一行摘要 |
 | 下一个思考 / 下一步开始 | 上一条继续按同一规则轮换 |
 | 你手动开合过某条 | **记下来，永不自动动它**（包括你手动收起正在跑的那条，也不抢回去） |
-| **一轮跑完** | 这一整轮的思考/命令**并成一条**「已完成 · 用时 3分50秒」，点它随时展开 |
+| **一轮跑完** | 这一整轮的思考/命令**并成一条**「已完成 · 用时 3分50秒」，点它随时展开；过程中的旁白一起收进去，只留最终回复 |
 | 卸载插件 | 把它撑开过的行收回官方状态 |
 
 判定"谁在跑"**完全读官方自己发布的状态**，没有任何计时器或启发式猜测。
@@ -35,7 +35,9 @@ Client-only and zero custom rendering: no self-made container, no stylesheet, no
 这不是自己画的摘要行，是官方内建的整轮编组（`ui-chat` 的 `transcriptView` 档位 + `TurnProcessNodeView`）。
 插件的做法分两层，缺一不可：
 
-1. **让官方处于"会折"的档位。** 四档语义（`dsh-client-ui-chat/lib/client.js` 的 `POLICIES`）：
+1. **让官方处于"会折、而且只留最终回复"的状态。** 这其实是两个独立开关，得一起看：
+
+   - `ui-chat.transcriptView` 决定**折不折**。四档语义（`dsh-client-ui-chat/lib/client.js` 的 `POLICIES`）：
 
    | 档位 | foldCompletedTurns | stepGrouping | 效果 |
    |---|---|---|---|
@@ -45,6 +47,20 @@ Client-only and zero custom rendering: no self-made container, no stylesheet, no
 
    插件面板里打开「完成后合并整轮」时，如果官方是 `verbose` 就拨到 `detailed`，并记住原档位；关掉时还原
    （只还原自己动过的，没动过一个字节也不写）。
+
+   - `ui-chat.foldedReplies` 决定**折起来以后哪些助手回复留在外面**（`FOLDED_REPLIES = ["all", "final"]`）：
+
+     | 值 | 含义 | 收起一轮后 |
+     |---|---|---|
+     | `all`（**官方默认**） | 每段回复都保留 | 过程旁白（"我来确认一下…"、"已拿到完整指南…"）**全留在外面**，白收 |
+     | `final` | 只留最终回复 | 旁白变过程成员，跟思考/命令一起收进去，只剩最后那段正文 |
+
+     源码支点：`dsh-client-ui-chat/lib/client.js` 的 `const keepReplies = usePresentation((policy) => policy.foldedReplies === "all");`
+     与 `const replyRow = keepReplies && routedNode?.kind === "assistant-step" && groupPart !== "reasoning" && hasAssistantReplyContent(...)` ——
+     `replyRow` 不进 `processMember`，所以 `all` 下收起来也收不掉。插件把这一项兜到 `final`，同样记住原值可还原。
+
+     两个值都只在**已经结束**的轮上生效：跑着的轮 `alwaysOpen = liveProcess` 恒展开，最终回复本身走
+     `processAnswer`（`routedNode.data.step === processSpec.answerStep`）始终留在折叠体外面。
 
 2. **一轮结束却还摊着时，替你把首行点一下。** 官方把所有轮的开合存在自己的 store 里，
    某一轮一旦被点开过就会一直摊着。插件扫到「没 `data-open` 就已经是合并态」的什么都不做；
@@ -94,19 +110,20 @@ dsh plugin --profile web add https://github.com/Citrusrr/dsh-think-fold/releases
 
 这个链接永远指向最新一版（文件名故意不带版本号）。
 
-**本地开发**：把自己的克隆以 `link:` 方式装进去，改文件后刷新页面即生效，不用重装 ——
+**本地开发**：把自己的克隆以 `link:` 方式装进去 ——
 
 ```
 plugin_manager(install_bundle, "<你的克隆路径>/dsh-think-fold")
 ```
 
-卸载：
+以 `link:` 方式安装时，**改本目录的文件后刷新页面即生效**，不用重装。
 
 ```
 plugin_manager(remove_bundle, "dsh-think-fold")
 ```
 
-卸载后会把插件撑开过的行收回官方状态，并还原它改过的 `ui-chat.transcriptView` 档位。
+卸载后会把插件撑开过的行收回官方状态，并还原它改过的两个官方设置
+（`ui-chat.transcriptView` 档位与 `ui-chat.foldedReplies`）。
 
 ## 在哪里调
 
@@ -162,8 +179,8 @@ __dshThinkFold.set({
   mergeDelayMs: 800,        // 轮结束后隔多久才并，0 = 立刻
 })
 
-__dshThinkFold.merge()      // 合并相关的实时状态：官方档位、开关、每一轮的首行（open / disabled / queued / owned）
-__dshThinkFold.setMerge(false)   // 关掉整轮合并（会还原插件动过的官方档位）
+__dshThinkFold.merge()      // 合并相关的实时状态：官方档位 official / foldedReplies、folding / finalOnly、开关、每一轮的首行（open / disabled / queued / owned）
+__dshThinkFold.setMerge(false)   // 关掉整轮合并（会把插件动过的两个官方设置都还原）
 
 __dshThinkFold.set({ collapseAnimMs: 0 })        // 回到官方的瞬间收起
 __dshThinkFold.set({ lingerMs: 1200 })           // 收之前先多停 1.2 秒
@@ -218,7 +235,7 @@ $env:DSH_APP_DIR = "D:/path/to/resources/app"     # 或：从 app.asar 解包后
 症状是**完全没反应、且控制台没有任何报错** —— 最容易误判成"选择器不对"。
 （对照 8 个社区同类插件：7 个都暴露了它。）
 
-**DOM 层（`test/contract.mjs`）**——对着已安装的 DSH 包源码核对 21 条契约（思考行的
+**DOM 层（`test/contract.mjs`）**——对着已安装的 DSH 包源码核对 25 条契约（思考行的
 `data-variant` / `data-state` / 条件挂载、工具卡的 `data-tool` / `data-sample` / 状态取值、
 `DisclosureRow` 的 `data-disclosure-row` / `aria-expanded` / `onClick` / `open && children`）。
 失败 = 官方改了契约，插件会安静地失效（表现为"不再自动开合"，不会破坏页面），按失败项改选择器即可。
@@ -233,4 +250,5 @@ $env:DSH_APP_DIR = "D:/path/to/resources/app"     # 或：从 app.asar 解包后
 - 整轮合并依赖官方的 `foldCompletedTurns`：`verbose` 档下 `foldable` 恒 false、首行按钮 `disabled`，
   此时只能靠第一层把档位拨到 `detailed` 才有效。
 - 无主机半区逻辑：`lib/index.js` 只是一个空 `apply()`，不读写文件、不发网络请求、不碰凭据
-  （唯一的外部副作用是经 `configForms` 写官方设置 `ui-chat.transcriptView`，且只在需要时写、可还原）。
+  （唯一的外部副作用是经 `configForms` 写官方设置 `ui-chat.transcriptView` 与 `ui-chat.foldedReplies`：
+  只在需要时写、都记住原值，关掉面板开关就还原）。

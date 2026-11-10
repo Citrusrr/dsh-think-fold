@@ -150,6 +150,27 @@ const CHECKS = [
     file: 'dsh-client-ui-chat',
     pattern: /turnProcess\.setOpen\(!open\)/,
   },
+  // ---- 「过程旁白也一起收」靠的是 foldedReplies，这四条是它的支点 ----
+  {
+    what: '官方 foldedReplies 默认 all（每段过程旁白都留在外面）',
+    file: 'dsh-client-ui-chat',
+    pattern: /\[FOLDED_REPLIES_FIELD\]: Schema\.union\(\[\.\.\.FOLDED_REPLIES\]\)\.default\("all"\)/,
+  },
+  {
+    what: 'keepReplies = foldedReplies === "all"（all 才把回复排除在过程之外）',
+    file: 'dsh-client-ui-chat',
+    pattern: /const keepReplies = usePresentation\(\(policy\) => policy\.foldedReplies === "all"\)/,
+  },
+  {
+    what: 'replyRow = keepReplies && assistant-step 且有回复内容（这类行永不折进整轮）',
+    file: 'dsh-client-ui-chat',
+    pattern: /const replyRow = keepReplies && routedNode\?\.kind === "assistant-step"[\s\S]{0,160}?hasAssistantReplyContent/,
+  },
+  {
+    what: '最终回复那一步留在外面（processAnswer = step === answerStep）',
+    file: 'dsh-client-ui-chat',
+    pattern: /routedNode\.data\.step === processSpec\.answerStep/,
+  },
 ];
 
 const sources = new Map();

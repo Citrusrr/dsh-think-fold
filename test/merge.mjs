@@ -129,11 +129,44 @@ function makeEnv(options = {}) {
   };
 
   const storage = new Map();
+  for (const [key, value] of Object.entries(options.storage ?? {})) storage.set(key, String(value));
   const localStorage = {
     getItem: (key) => (storage.has(key) ? storage.get(key) : null),
     setItem: (key, value) => { storage.set(key, String(value)); },
     removeItem: (key) => { storage.delete(key); },
   };
+
+  /* --- 官方 ui-chat 设置的替身（第一层写这里：transcriptView / foldedReplies） --- */
+  const writes = [];
+  const formSubs = new Set();
+  const officialValue = { ...(options.official ?? {}) };
+  const form = {
+    getSnapshot: () => ({ value: { ...officialValue } }),
+    subscribe: (fn) => { formSubs.add(fn); return () => { formSubs.delete(fn); }; },
+    set: (field, value) => {
+      writes.push([field, value]);
+      officialValue[field] = value;
+      for (const fn of [...formSubs]) fn();
+      return Promise.resolve(true);
+    },
+    mutate: (ops) => {
+      for (const op of ops) {
+        writes.push([op.path[0], op.value]);
+        officialValue[op.path[0]] = op.value;
+      }
+      for (const fn of [...formSubs]) fn();
+      return Promise.resolve(true);
+    },
+  };
+  /** 只给 configForms；slots 故意不给（面板/按钮与本文件无关） */
+  const cleanups = [];
+  const ctx = options.services === true ? {
+    effect: (fn) => { const off = fn(); cleanups.push(off); return off; },
+    inject: (deps, cb) => {
+      if (!deps.every((dep) => dep === 'configForms')) return;
+      cb({ configForms: { get: (ns) => { if (ns !== 'ui-chat') throw new Error('未知命名空间 ' + ns); return form; } }, effect: ctx.effect });
+    },
+  } : {};
 
   const performance = { now: () => clock };
   // Node 里没有 MouseEvent（浏览器才有），自己给一个够插件用的
@@ -194,13 +227,17 @@ function makeEnv(options = {}) {
     requestAnimationFrame, cancelAnimationFrame, setTimeoutStub, clearTimeoutStub,
     El, El, quiet, globalThis);
 
-  api.apply({});   // 没有 ctx.effect：start() 直接跑
+  api.apply(ctx);   // 不给 services 时是个空 ctx：没有 ctx.effect，start() 直接跑
 
   /** 推进时钟 + 跑完所有挂起的 rAF / 定时器，然后主动扫一次。 */
   function flush(advanceMs = 1000) {
     clock += advanceMs;
     for (const entry of [...timers.values()]) { timers.clear(); entry.cb(); }
     for (const [id, cb] of [...frames]) { frames.delete(id); cb(); }
+  }
+  /** 让 await 链跑完（写官方设置是异步的）。 */
+  async function settle() {
+    for (let i = 0; i < 24; i += 1) await Promise.resolve();
   }
   function scan(advanceMs = 1000) {
     flush(advanceMs);
@@ -212,7 +249,10 @@ function makeEnv(options = {}) {
   function headers() { return flow.querySelectorAll('[data-turn-process]'); }
 
   flush(0);   // start() 里那次 schedule()
-  return { window, document, flow, headers, scan, flush, userClick, errors, api: () => window.__dshThinkFold };
+  return {
+    window, document, flow, headers, scan, flush, settle, userClick, errors, writes, form,
+    official: () => ({ ...officialValue }), api: () => window.__dshThinkFold,
+  };
 }
 
 /* --------------------------------------------------------------- 断言 -- */
@@ -300,6 +340,70 @@ console.log('完成后合并整轮（第二层）行为：');
   const snapshot = env.api().merge();
   check('诊断接口能看到每一轮的状态', snapshot.turns.length === 3 && snapshot.turns.every((t) => typeof t.open === 'boolean'),
     JSON.stringify(snapshot.turns.map((t) => ({ turn: t.turn, open: t.open, queued: t.queued }))));
+}
+
+/* ---------------- 第一层：把官方两个设置兜到「会折整轮 + 只留最终回复」 ---------------- */
+
+{
+  const env = makeEnv({ services: true, official: { transcriptView: 'verbose', foldedReplies: 'all' } });
+  await env.settle();
+  const written = env.writes.map(([field, value]) => field + '=' + value).join(', ');
+  check('官方「不合并 + 旁白全留」→ 两个字段都拨过来',
+    env.official().transcriptView === 'detailed' && env.official().foldedReplies === 'final', written || '一个都没写');
+  const snapshot = env.api().merge();
+  check('诊断接口反映官方状态', snapshot.folding === true && snapshot.finalOnly === true && snapshot.official === 'detailed',
+    JSON.stringify({ official: snapshot.official, foldedReplies: snapshot.foldedReplies, finalOnly: snapshot.finalOnly }));
+}
+
+{
+  // 就是截图那种情况：工作详情档位本来就是 detailed，但过程旁白默认「全留」
+  const env = makeEnv({ services: true, official: { transcriptView: 'detailed', foldedReplies: 'all' } });
+  await env.settle();
+  check('只差「旁白全留」→ 只拨 foldedReplies，不碰工作详情档位',
+    env.writes.length === 1 && env.writes[0][0] === 'foldedReplies' && env.writes[0][1] === 'final',
+    env.writes.map(([field, value]) => field + '=' + value).join(', ') || '一个都没写');
+}
+
+{
+  const env = makeEnv({ services: true, official: { transcriptView: 'detailed', foldedReplies: 'final' } });
+  await env.settle();
+  check('官方本来就是对的状态 → 一个字节也不写', env.writes.length === 0, '写了 ' + env.writes.length + ' 次');
+}
+
+{
+  const env = makeEnv({
+    services: true,
+    storage: { 'dsh-think-fold': JSON.stringify({ mergeTurns: false }) },
+    official: { transcriptView: 'verbose', foldedReplies: 'all' },
+  });
+  await env.settle();
+  check('开关关着 → 只反映官方状态，不动它', env.writes.length === 0, '写了 ' + env.writes.length + ' 次');
+}
+
+{
+  const env = makeEnv({ services: true, official: { transcriptView: 'verbose', foldedReplies: 'all' } });
+  await env.settle();
+  env.api().setMerge(false);
+  await env.settle();
+  check('关掉面板开关 → 还原成我们动手之前的样子',
+    env.official().transcriptView === 'verbose' && env.official().foldedReplies === 'all',
+    JSON.stringify(env.official()));
+  const again = env.writes.length;
+  env.api().setMerge(false);
+  await env.settle();
+  check('重复关 → 没有可还原的东西就不动', env.writes.length === again, '又多写 ' + (env.writes.length - again) + ' 次');
+}
+
+{
+  const env = makeEnv({ services: true, official: { transcriptView: 'detailed', foldedReplies: 'all' } });
+  await env.settle();
+  env.flush(5000);                       // 跳过 4 秒的兜底冷却
+  env.form.set('foldedReplies', 'all');  // 你在官方设置页里手动改回「过程旁白全留」
+  await env.settle();
+  const ours = env.writes.filter(([, value]) => value === 'final').length;  // 只数插件自己写的
+  check('你手动改回「旁白全留」→ 冷却过后再兜一次',
+    env.official().foldedReplies === 'final' && ours === 2,
+    env.writes.map(([field, value]) => field + '=' + value).join(', '));
 }
 
 if (failed === 0) {
