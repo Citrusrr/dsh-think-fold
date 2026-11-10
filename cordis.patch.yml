@@ -1,0 +1,6 @@
+# dsh-think-fold bundle patch：主机半区只占一行（空壳），全部行为在浏览器半区。
+# 浏览器半区走 package.json 的 dsh.client 清单，client-modules 据此提供 lib/client.js。
+# 用 `install_bundle` 装本目录后本层自动生效；不要往 profile 的 cordis.patch.yml 手动 insert 同一个 id。
+- insert:
+    - id: dsh-think-fold
+      name: 'dsh-think-fold'

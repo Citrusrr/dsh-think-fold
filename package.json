@@ -1,0 +1,51 @@
+{
+  "name": "dsh-think-fold",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Auto-expands the row that is running and folds it back when it settles, then merges a finished turn into the built-in process header. 当前正在执行的那一条自动展开、执行完自动收起；一轮跑完再把整轮过程并成一条「已完成 · 用时」。纯客户端，零自研容器，排版完全走官方。",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Citrusrr/dsh-think-fold.git"
+  },
+  "homepage": "https://github.com/Citrusrr/dsh-think-fold#readme",
+  "bugs": {
+    "url": "https://github.com/Citrusrr/dsh-think-fold/issues"
+  },
+  "author": "Citrusrr",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "think",
+    "fold",
+    "collapse",
+    "transcript",
+    "ui"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "test",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/package.mjs && node test/contract.mjs && node test/merge.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  }
+}
