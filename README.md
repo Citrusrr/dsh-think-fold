@@ -86,15 +86,27 @@ open && children
 
 ## 安装 / 卸载
 
+列进插件市场后可以直接在 **Plugins → Discover** 里搜到。不经市场时用 Release 上的预构建包：
+
 ```
-plugin_manager(install_bundle, "D:\\Python3.9.12\\penghaoyang\\dsh-think-fold")
+dsh plugin --profile web add https://github.com/Citrusrr/dsh-think-fold/releases/latest/download/dsh-think-fold.tgz
 ```
 
-以 `link:` 方式安装 —— **改本目录的文件后刷新页面即生效**，不用重装。
+这个链接永远指向最新一版（文件名故意不带版本号）。
+
+**本地开发**：把自己的克隆以 `link:` 方式装进去，改文件后刷新页面即生效，不用重装 ——
+
+```
+plugin_manager(install_bundle, "<你的克隆路径>/dsh-think-fold")
+```
+
+卸载：
 
 ```
 plugin_manager(remove_bundle, "dsh-think-fold")
 ```
+
+卸载后会把插件撑开过的行收回官方状态，并还原它改过的 `ui-chat.transcriptView` 档位。
 
 ## 在哪里调
 
