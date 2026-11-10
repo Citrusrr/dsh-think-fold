@@ -195,17 +195,20 @@ __dshThinkFold.set({ enabled: false })           // 停用，已撑开的会收�
 插件的全部正确性压在两层契约上，升级或改动后各跑一次：
 
 ```
-npm test                      # = 下面三条
+npm test                      # 打包层 + 行为层，只要有 node 就能跑
 node test/package.mjs         # 打包层：宿主认不认这个包
-node test/contract.mjs        # DOM 层：官方语义属性还在不在
 node test/merge.mjs           # 行为层：整轮合并的判断逻辑（极简 DOM 替身里跑 lib/client.js 真身）
+
+npm run test:contract         # DOM 层：官方语义属性还在不在（需要一份 DSH 源码，见下）
 ```
 
 `contract.mjs` 要找到一份**未打包**的 DSH 源码（打包成 `app.asar` 的安装目录里没有
-`node_modules/@deepseek-ai`）。找不到时它会把试过的路径全部打出来，此时用参数或环境变量指过去：
+`node_modules/@deepseek-ai`）。找不到时它会把试过的路径全部打出来。这也正是它不在 `npm test`
+里的原因：刚克隆下来的人手上没有 DSH 源码，不该因为一件他没做错的事看到一个红叉。
+手里有源码时用参数或环境变量指过去：
 
 ```
-node test/contract.mjs "D:/path/to/resources/app/node_modules/@deepseek-ai"
+npm run test:contract -- "D:/path/to/resources/app/node_modules/@deepseek-ai"
 $env:DSH_APP_DIR = "D:/path/to/resources/app"     # 或：从 app.asar 解包后的目录
 ```
 

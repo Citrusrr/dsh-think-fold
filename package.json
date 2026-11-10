@@ -36,7 +36,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node test/package.mjs && node test/contract.mjs && node test/merge.mjs"
+    "test": "node test/package.mjs && node test/merge.mjs",
+    "test:contract": "node test/contract.mjs"
   },
   "dsh": {
     "bundle": {
