@@ -1,9 +1,9 @@
 {
   "name": "dsh-think-fold",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
-  "description": "Auto-expands the row that is running and folds it back when it settles, then merges a finished turn into the built-in process header with only the final answer left on screen. 当前正在执行的那一条自动展开、执行完自动收起；一轮跑完把整轮过程（连同中间旁白）并成一条「已完成 · 用时」，只留最终回复。纯客户端，零自研容器，排版完全走官方。",
+  "description": "Auto-expands the row that is running and folds it back when it settles. While a turn runs, its whole procedure sits in one height-capped window that scrolls itself; when the turn finishes, it merges into the built-in process header — narration included, only the final answer left on screen. Client-only, zero custom rendering: layout, code blocks and diffs are all the official ones. 当前正在执行的那一条自动展开、执行完自动收起；跑着的一轮把整段过程收进一个限高窗口自己滚到最新；一轮跑完再把整轮过程（连同中间旁白）并成一条「已完成 · 用时」，只留最终回复。",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Citrusrr/dsh-think-fold.git"

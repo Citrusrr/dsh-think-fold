@@ -171,6 +171,27 @@ const CHECKS = [
     file: 'dsh-client-ui-chat',
     pattern: /routedNode\.data\.step === processSpec\.answerStep/,
   },
+  // ---- 「跑着的一轮收进限高窗口」靠的是过程组正文，这四条是它的支点 ----
+  {
+    what: '官方过程组正文自带 max-height:min(400px,50vh)（已结束的组才有）',
+    file: 'dsh-client-ui-chat',
+    pattern: /max-height:min\(400px,50vh\);overflow-y:auto\}/,
+  },
+  {
+    what: '过程正文元素标了 data-step-process-body（插件挂限高用）',
+    file: 'dsh-client-ui-chat',
+    pattern: /"data-step-process-body": true/,
+  },
+  {
+    what: '跑着的一轮挂 data-group-expanded-mode（没编成组 = 正文不限高）',
+    file: 'dsh-client-ui-chat',
+    pattern: /"data-group-expanded-mode": !grouped \|\| void 0/,
+  },
+  {
+    what: 'capped = grouped && …（没编成组就放开限高，正是跑着的时候）',
+    file: 'dsh-client-ui-chat',
+    pattern: /const capped = grouped && \(!deferCompletedTurns \|\| \(shownCap \?\? closingCap\)\)/,
+  },
 ];
 
 const sources = new Map();

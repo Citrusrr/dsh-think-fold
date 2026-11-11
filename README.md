@@ -1,8 +1,8 @@
 # dsh-think-fold
 
-Automatically expands the row that is currently running — the official Think row and the official tool cards — and folds it back when it settles. When a turn finishes, that whole turn's process rows merge into the built-in "processed" header, narration included, so only the final answer stays on screen.
+Automatically expands the row that is currently running — the official Think row and the official tool cards — and folds it back when it settles. While a turn is still running its whole procedure lives in one height-capped window that scrolls itself, so the page stops growing with every step; when the turn finishes, that procedure merges into the built-in "processed" header, narration included, so only the final answer stays on screen.
 
-Client-only and zero custom rendering: no self-made container, no stylesheet, no Markdown re-implementation. Layout, font sizes, code blocks, diffs and images are all the official ones. The plugin makes exactly one kind of write to the page — dispatching a single `click` on the official `[data-disclosure-row]` — and decides what is running purely from the state the official UI already publishes (`data-state`), never from timers or heuristics. Rows you opened or closed by hand are recorded and never touched again, and uninstalling restores the official settings it changed.
+Client-only and zero custom rendering: no self-made container, no stylesheet, no Markdown re-implementation. Layout, font sizes, code blocks, diffs and images are all the official ones. The plugin writes to the page in exactly two ways — dispatching a single `click` on the official `[data-disclosure-row]`, and capping the official `[data-step-process-body]` the way the official finished-turn grouping already does — and decides what is running purely from the state the official UI publishes (`data-state`, `data-group-expanded-mode`), never from timers or heuristics. Rows you opened or closed by hand are recorded and never touched again, and uninstalling restores the official settings it changed.
 
 ---
 
@@ -22,10 +22,37 @@ Client-only and zero custom rendering: no self-made container, no stylesheet, no
 | 工具执行完 | 那张工具卡收回官方的一行摘要 |
 | 下一个思考 / 下一步开始 | 上一条继续按同一规则轮换 |
 | 你手动开合过某条 | **记下来，永不自动动它**（包括你手动收起正在跑的那条，也不抢回去） |
+| **跑着的时候** | 这一轮的所有过程（思考/命令/编辑…）都在**一个限高窗口**里，窗口内自己滚到最新，页面不再被越堆越长的过程拽着走 |
 | **一轮跑完** | 这一整轮的思考/命令**并成一条**「已完成 · 用时 3分50秒」，点它随时展开；过程中的旁白一起收进去，只留最终回复 |
 | 卸载插件 | 把它撑开过的行收回官方状态 |
 
 判定"谁在跑"**完全读官方自己发布的状态**，没有任何计时器或启发式猜测。
+
+## 跑着的时候：过程也在一个窗口里
+
+官方其实**有**这个窗口 —— 但只在「这一轮已经结束、过程被编成组」时给：
+`dsh-client-ui-chat/lib/client.js` 的组样式 `.…_body{…max-height:min(400px,50vh);overflow-y:auto}`，
+跑着的时候挂的是 `.…_expandedBody{max-height:none;overflow:visible}`（不限高），因为那一轮还没"编成组"。
+
+判据就在 DOM 上：组元素带 **`data-group-expanded-mode`** ⇔ 官方没把它当已结束的组 ⇔ **正在跑**
+（`"data-group-expanded-mode": !grouped || void 0`）。官方这时连跟随和边缘淡出都不做
+（`useProcessScroll` 第一行 `body.closest("[hidden], [data-group-expanded-mode]") === null` 才工作）。
+
+所以这一块空间是官方留给我们的，插件接手做三件事：
+
+1. **接过限高**：给 `[data-step-process-body]` 写 `max-height: min(<过程窗口高度>px, 60vh)`、`overflow-y:auto`、
+   `overflow-anchor:none`（不禁用原生锚定的话，边滚边被浏览器拽回去，就是"卡一下再下去"）。
+   首次挂上直接把 `scrollTop` 钉到底，不从开头慢慢滚。
+2. **窗口内逐帧跟随**：复用思考窗口那套 `followLoop`（每帧自持、直接读最新 `scrollHeight`、`followEase` 比例 + 最小 1.2px，
+   差 2px 以内直接贴底）。你手动往上滚就暂停，滚回底部自动恢复。上下边缘按官方同款 24px 渐变淡出。
+3. **不套第二层**：已经在过程窗口里的思考行不再单独开思考窗口（`insideCappedProcess()`），一个窗口就够。
+
+轮一旦结束，`data-group-expanded-mode` 消失 → 滚动、淡出、跟随**当场交还官方**
+（它自己的 class 会给 `overflow-y:auto` 和 `fadeTop/fadeBottom`，也有自己的跟随），
+我们只把「你调的高度」继续挂着，上限换成官方的 `50vh`；然后才是「一轮跑完并成一条」那层接管。
+
+面板里「过程窗口高度」默认 **400**（跟官方同款），0 = 不限高；控制台 `__dshThinkFold.windows()`
+能看到每一组的 `expandedMode / capped / height / offset / floor`（`offset === floor` 就是已贴底）。
 
 ## 一轮跑完并成一条
 
@@ -122,7 +149,7 @@ plugin_manager(install_bundle, "<你的克隆路径>/dsh-think-fold")
 plugin_manager(remove_bundle, "dsh-think-fold")
 ```
 
-卸载后会把插件撑开过的行收回官方状态，并还原它改过的两个官方设置
+卸载后会把插件撑开过的行收回官方状态，还原它写过的内联样式，并还原它改过的两个官方设置
 （`ui-chat.transcriptView` 档位与 `ui-chat.foldedReplies`）。
 
 ## 在哪里调
@@ -132,16 +159,21 @@ plugin_manager(remove_bundle, "dsh-think-fold")
 | 设置项 | 作用 |
 |---|---|
 | 启用 | 总开关；关掉即回到官方行为，已撑开的会收回 |
-| 收起过渡 | 0 = 官方那样瞬间消失；200~300 最自然（默认 260） |
+| 完成后合并整轮 | 一轮跑完把整轮过程并成一条「已完成 · 用时」 |
+| 合并延迟 | 一轮结束后先停这么久再并成一条 |
+| 收起过渡 | 0 = 官方那样瞬间消失；160~240 最自然（默认 200） |
 | 收起延迟 | 跑完后先停这么久再开始收 |
 | 淡出程度 | 过渡期间正文淡到多透明；100% = 只收高度不淡出 |
 | 最短展开时长 | read / grep 这类秒回的工具不展开，免得闪一下 |
+| 过程窗口 | 跑着的那一轮，整段过程收进一个窗口内自己滚；**关掉 = 平铺（页面会被越撑越长）** |
+| 过程窗口高度 | 只在「过程窗口」启用时出现：窗口最多这么高（0 = 不限高） |
 | 思考窗口高度 | 长思考压成内滚窗口，页面不再一直往下滚；0 = 不限高 |
+| 跟随平滑度 | 窗口跟随时每 1/60 秒吃掉剩余距离的比例（默认 28%） |
 | 工具卡也自动开合 | 命令、文件修改、网页、子代理… |
 | 提问卡也自动展开 | LLM 用 `ask_user_question` 问你的时候 |
 | 保留最近几条已跑完的 | 0 = 只留正在跑的那条 |
 | 滚动补偿 | 收起时下方内容跳动了再打开 |
-| 恢复默认 | 一键回到出厂值 |
+| 恢复默认 | 一键回到出厂值（就是下面「推荐默认值」那套） |
 
 按钮图标是自绘的「折角箭头压向一条横线」（折起来，16px、1.5 描边，跟「＋」同一套线条风格）；插件停用时图标变半透明，鼠标悬停有提示当前状态。关闭面板：点面板外、按 `Esc`、或点右上角 `✕`。
 
@@ -166,20 +198,25 @@ __dshThinkFold.set({
   mode: 'live',             // live = 只留正在跑的；keepLast = 额外保留最近 N 条跑完的
   keepLast: 0,
   lingerMs: 0,              // 跑完后延迟多久再收（毫秒）；想让它多停一会儿就调大
-  collapseAnimMs: 260,      // 收起过渡时长；0 = 官方那样瞬间消失
+  collapseAnimMs: 200,      // 收起过渡时长；0 = 官方那样瞬间消失
   collapseFadeTo: 0.15,     // 过渡期间淡到多透明（1 = 不淡出，只收高度）
   scrollCompensate: false,  // 收起时手动补 scrollTop；看到跳动了再打开
-  minLiveMs: 250,           // 跑满多久才值得展开：read/grep 这类几十毫秒的工具不展开，避免闪一下
-  thinkWindowMax: 440,      // 长思考压成内滚窗口（px）；0 = 不限高，思考很长时页面会一直滚
+  minLiveMs: 200,           // 跑满多久才值得展开：read/grep 这类几十毫秒的工具不展开，避免闪一下
+  thinkWindowMax: 400,      // 长思考压成内滚窗口（px）；0 = 不限高，思考很长时页面会一直滚
+  processWindowEnabled: true, // 跑着的那一轮收进过程窗口；false = 平铺（高度值仍记着）
+  processWindowMax: 400,    // 过程窗口最多这么高（px）；0 = 不限高
+  followEase: 0.28,         // 跟随平滑度：每 1/60 秒吃掉剩余距离的比例（已按帧率换算，60/120Hz 手感一致）
   includeTools: true,       // 工具卡是否参与（关掉 = 只做思考行）
   includeQuestions: false,  // LLM 提问卡 ask_user_question 是否参与
   collapseOwnedOnly: true,  // 只收插件自己展开的（推荐保持 true）
-  cooldownMs: 320,          // 点击后等官方重渲染的静默期
+  cooldownMs: 260,          // 点击后等官方重渲染的静默期
   mergeTurns: true,         // 一轮跑完把整轮并成一条「已完成 · 用时」
-  mergeDelayMs: 800,        // 轮结束后隔多久才并，0 = 立刻
+  mergeDelayMs: 600,        // 轮结束后隔多久才并，0 = 立刻
 })
 
 __dshThinkFold.merge()      // 合并相关的实时状态：官方档位 official / foldedReplies、folding / finalOnly、开关、每一轮的首行（open / disabled / queued / owned）
+__dshThinkFold.windows()    // 过程窗口 / 思考窗口：max、thinkMax、每组 {expandedMode, capped, height, offset, floor}
+__dshThinkFold.stats()      // 性能计数：ticks（结构性扫描次数）/ followFrames / followWakes / avgTickMs / avgFollowMs
 __dshThinkFold.setMerge(false)   // 关掉整轮合并（会把插件动过的两个官方设置都还原）
 
 __dshThinkFold.set({ collapseAnimMs: 0 })        // 回到官方的瞬间收起
@@ -188,6 +225,43 @@ __dshThinkFold.set({ includeQuestions: true })   // 提问卡也自动展开
 __dshThinkFold.set({ minLiveMs: 0 })             // 再快的工具也展开
 __dshThinkFold.set({ enabled: false })           // 停用，已撑开的会收回
 ```
+
+## 性能：一帧只做一件事
+
+DSH 的正文是**流式**的：一句话还在写的时候，DOM 里是在同一个文本节点上不停改字符
+（`characterData`），一秒能来几十上百条 MutationRecord。所以性能的关键不在"算得快"，
+而在"哪些事不必算"：
+
+| 以前 | 现在 |
+|---|---|
+| `MutationObserver`（含 `characterData`）的回调直接 `schedule()` → 每来一个字就整帧全量 `collectRows()` + `applyProcessWindows()` + 合并检查 | 回调分流：`characterData` **只叫醒跟随循环**；`childList` / `attributes`（只订阅 `data-state` / `data-expanded` / `aria-expanded` / `data-open`）才置脏标记，下一帧重扫一次 |
+| 跟随循环每帧自己 `collectRows()` + `querySelectorAll('[data-step-process]')` | 结构扫描时顺手算好 `followBodies`（要跟的窗口清单），跟随循环只读这个数组，不再查 DOM |
+| 跟随循环里"读 `scrollTop` → 写 `scrollTop` → 再读下一个"交替，反复强制重排 | 两遍走：先全部读完（`scrollTop` / `scrollHeight` / `clientHeight`）算好计划，再一次性写 |
+| 追平后仍然 60fps 空转 | 追平后空转 18 帧就停，等下一次 DOM 变化再被叫醒 |
+
+另外两个观感细节：
+
+- **缓动是帧率无关的**。`followEase` 的含义是「每 16.7ms 吃掉剩余距离的比例」，120Hz 屏上一帧
+  只有 8ms，就按 `dt / 16.7` 换算成等价比例（`k = 1 - (1 - ease) ** (dt / 16.7)`），
+  所以两种屏上是同一条曲线、同样的手感，不会出现"高刷屏反而更黏"。
+- **快到底就直接贴**（剩余 ≤ 3px）。渐近逼近永远差零点几像素，「跟到底」就会永远差一口气。
+
+想自己看数据：`__dshThinkFold.stats()`。健康的样子是 —— 流式输出时 `followFrames` 一直在涨、
+`followWakes` 跟着涨，而 **`ticks`（结构性扫描次数）基本不动**（只在真的增删行时 +1）。
+
+## 推荐默认值
+
+「恢复默认」就是下面这套。它不是随手定的，是"每一条都能说出理由"的那一组：
+
+| 参数 | 值 | 为什么 |
+|---|---|---|
+| `collapseAnimMs` | **200** | 折起来要"动一下"，但超过 ~240ms 就开始等它；官方 hover 过渡是 100ms，200ms 大约是最长可接受的两倍 |
+| `minLiveMs` | **200** | 低于 200ms 的工具（read / grep 秒回）展开再收就是闪一下；200 刚好过滤掉"闪"，又不会漏掉真正跑起来的命令 |
+| `followEase` | **0.28** | 约 150ms 走完 95% 的距离：足够跟上流式输出，又看得出是"滑"不是"跳" |
+| `thinkWindowMax` | **400** | 和官方过程组正文的 `min(400px, 50vh)` 对齐 —— 视觉上两类窗口高度一致 |
+| `processWindowMax` | **400** | 同上；跑着时上限 `min(400px, 60vh)`，比官方多留一点余量 |
+| `cooldownMs` | **260** | React 提交一帧通常 < 16ms，260ms 足够覆盖一次重渲染 + 一次动画帧，又短到不会让你觉得"点不动" |
+| `mergeDelayMs` | **600** | 轮结束后留半秒看清最后一行，再并成一条 |
 
 ## 收起过渡是怎么做的
 
@@ -214,7 +288,7 @@ __dshThinkFold.set({ enabled: false })           // 停用，已撑开的会收�
 ```
 npm test                      # 打包层 + 行为层，只要有 node 就能跑
 node test/package.mjs         # 打包层：宿主认不认这个包
-node test/merge.mjs           # 行为层：整轮合并的判断逻辑（极简 DOM 替身里跑 lib/client.js 真身）
+node test/merge.mjs           # 行为层：整轮合并 / 过程窗口 / 性能分流（极简 DOM 替身里跑 lib/client.js 真身）
 
 npm run test:contract         # DOM 层：官方语义属性还在不在（需要一份 DSH 源码，见下）
 ```
@@ -235,15 +309,21 @@ $env:DSH_APP_DIR = "D:/path/to/resources/app"     # 或：从 app.asar 解包后
 症状是**完全没反应、且控制台没有任何报错** —— 最容易误判成"选择器不对"。
 （对照 8 个社区同类插件：7 个都暴露了它。）
 
-**DOM 层（`test/contract.mjs`）**——对着已安装的 DSH 包源码核对 25 条契约（思考行的
+**DOM 层（`test/contract.mjs`）**——对着已安装的 DSH 包源码核对 29 条契约（思考行的
 `data-variant` / `data-state` / 条件挂载、工具卡的 `data-tool` / `data-sample` / 状态取值、
-`DisclosureRow` 的 `data-disclosure-row` / `aria-expanded` / `onClick` / `open && children`）。
+`DisclosureRow` 的 `data-disclosure-row` / `aria-expanded` / `onClick` / `open && children`、
+整轮折叠首行的 `data-turn-process` / `data-open` / `disabled` / `setOpen`、
+`foldedReplies` 的 `keepReplies` / `replyRow` / `answerStep`、过程组的 `data-step-process-body` /
+`data-group-expanded-mode` / `max-height:min(400px,50vh)`）。
 失败 = 官方改了契约，插件会安静地失效（表现为"不再自动开合"，不会破坏页面），按失败项改选择器即可。
 
 ## 已知边界
 
 - 靠官方语义属性工作，官方改属性名就会失效 —— 失效表现是"不再自动开合"，不会破坏页面。
 - 只处理**会话流里最外层**的过程行：子代理卡展开出的嵌套正文、子调用卡不参与（避免插件去掏你看不见的内层）。
+- **过程窗口的高度对"正在跑"和"已结束"都生效**（判据分别是 `data-group-expanded-mode` 有 / 无）；
+  区别只是跑着时滚动、淡出、跟随由插件做（上限 `60vh`），结束后全部交还官方（上限 `50vh`）。
+- 窗口高度写的是 `min(<你的值>px, 60vh)`：屏幕矮的时候按 60vh 走，不会超过半屏多一点。
 - 官方搜索（Ctrl+F）折叠起来的内容不点。
 - **整轮合并的第二层（点首行）是"点一下就收"，没有高度过渡**：官方被折掉的行是直接挂 `hidden` 的，
   成员行是彼此独立的 seat，没有统一 wrapper 可以量高度做动画（官方自己也是瞬收）。

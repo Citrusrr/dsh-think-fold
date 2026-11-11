@@ -44,6 +44,10 @@ class El {
     this.clicks = 0;
     this.style = {};
     this.dataset = {};
+    // 滚动窗口的替身：插件会读 scrollHeight/clientHeight、写 scrollTop
+    this.scrollTop = 0;
+    this.scrollHeight = 0;
+    this.clientHeight = 0;
     if (parent !== null) parent.children.push(this);
   }
 
@@ -113,6 +117,18 @@ function makeEnv(options = {}) {
     header.textContent = spec.label ?? '已完成 · 用时 3分50秒';
   }
 
+  /* --- 过程组（跑着的一轮 = data-group-expanded-mode + 不限高的正文） --- */
+  const processBodies = [];
+  for (const spec of options.groups ?? []) {
+    const group = new El('div', { 'data-step-process': '', 'data-chat-turn': spec.turn ?? 'g' + processBodies.length }, flow);
+    if (spec.live !== false) group.setAttribute('data-group-expanded-mode', '');
+    const groupBody = new El('div', { 'data-step-process-body': '' }, group);
+    groupBody.scrollHeight = spec.scrollHeight ?? 0;
+    groupBody.clientHeight = spec.clientHeight ?? 0;
+    new El('div', { 'data-step-process-content': '', 'data-chat-flow': '' }, groupBody);
+    processBodies.push(groupBody);
+  }
+
   docListeners = new Map();
   const document = {
     body,
@@ -179,7 +195,14 @@ function makeEnv(options = {}) {
     preventDefault() { this.defaultPrevented = true; }
   }
   const MouseEvent = MouseEventStub;
-  class MutationObserver { observe() {} disconnect() {} takeRecords() { return []; } }
+  // 记录回调：测试要手动喂一批 MutationRecord，验证「字符变化只唤醒跟随、不重扫结构」
+  const observers = [];
+  class MutationObserver {
+    constructor(cb) { this.cb = cb; observers.push(this); }
+    observe() {}
+    disconnect() {}
+    takeRecords() { return []; }
+  }
   const requestAnimationFrame = (cb) => { const id = ++rafSeq; frames.set(id, cb); return id; };
   const cancelAnimationFrame = (id) => { frames.delete(id); };
   const setTimeoutStub = (cb, ms) => { const id = ++timerSeq; timers.set(id, { cb, ms }); return id; };
@@ -246,11 +269,16 @@ function makeEnv(options = {}) {
   /** 模拟你亲手点了某个元素（走 document 捕获监听器，不计入插件派发次数）。 */
   function userClick(el) { fireDocument('click', el); }
 
+  /** 手动喂一批 MutationRecord（浏览器里由真实 DOM 变化产生）。 */
+  function mutate(records) {
+    for (const ob of observers) if (typeof ob.cb === 'function') ob.cb(records);
+  }
+
   function headers() { return flow.querySelectorAll('[data-turn-process]'); }
 
   flush(0);   // start() 里那次 schedule()
   return {
-    window, document, flow, headers, scan, flush, settle, userClick, errors, writes, form,
+    window, document, flow, headers, processBodies, scan, flush, settle, userClick, mutate, errors, writes, form,
     official: () => ({ ...officialValue }), api: () => window.__dshThinkFold,
   };
 }
@@ -404,6 +432,170 @@ console.log('完成后合并整轮（第二层）行为：');
   check('你手动改回「旁白全留」→ 冷却过后再兜一次',
     env.official().foldedReplies === 'final' && ours === 2,
     env.writes.map(([field, value]) => field + '=' + value).join(', '));
+}
+
+/* ---------------- 跑着的那一轮：整段过程收进限高窗口 ---------------- */
+
+{
+  const env = makeEnv({ groups: [{ turn: 'live', scrollHeight: 1200, clientHeight: 400 }] });
+  env.scan();
+  const [body] = env.processBodies;
+  check('跑着的一轮 → 过程正文挂上限高窗口',
+    body.style.maxHeight === 'min(400px, 60vh)' && body.style.overflowY === 'auto' && body.style.overflowAnchor === 'none',
+    JSON.stringify({ maxHeight: body.style.maxHeight, overflowY: body.style.overflowY }));
+  check('首次挂上直接钉到最新（不从开头慢慢滚）', body.scrollTop === 800, 'scrollTop = ' + body.scrollTop);
+  const snapshot = env.api().windows();
+  check('诊断接口能看到这个窗口', snapshot.max === 400 && snapshot.groups[0].capped === true, JSON.stringify(snapshot.groups[0]));
+}
+
+{
+  const env = makeEnv({ groups: [{ turn: 'live', scrollHeight: 1200, clientHeight: 400 }] });
+  env.scan();
+  const [body] = env.processBodies;
+  body.scrollHeight = 1600;          // 又跑了几步，内容变长
+  env.flush(16);                     // 一帧
+  check('窗口内自己往底部追', body.scrollTop > 800 && body.scrollTop <= 1200, 'scrollTop = ' + body.scrollTop);
+  for (let i = 0; i < 40; i += 1) env.flush(16);
+  check('追平后停在底部', body.scrollTop === 1200, 'scrollTop = ' + body.scrollTop);
+}
+
+{
+  const env = makeEnv({ groups: [{ turn: 'live', scrollHeight: 1200, clientHeight: 400 }] });
+  env.scan();
+  const [body] = env.processBodies;
+  env.api().set({ processWindowMax: 0 });
+  env.scan();
+  check('把「过程窗口高度」调成 0 → 样式全还回去（官方原样）',
+    body.style.maxHeight === '' && body.style.overflowY === '' && body.style.overflowAnchor === '',
+    JSON.stringify(body.style));
+}
+
+{
+  const env = makeEnv({ groups: [{ turn: 'done', live: false }] });
+  env.scan();
+  const [body] = env.processBodies;
+  check('这一轮已经结束 → 只接高度（上限按官方 50vh），滚动和淡出留给官方',
+    body.style.maxHeight === 'min(400px, 50vh)' && (body.style.overflowY ?? '') === '' && (body.style.overflowAnchor ?? '') === '',
+    JSON.stringify(body.style));
+}
+
+{
+  const env = makeEnv({ groups: [{ turn: 'live', scrollHeight: 900, clientHeight: 400 }] });
+  env.scan();
+  const [group] = env.document.querySelectorAll('[data-step-process]');
+  const [body] = env.processBodies;
+  check('跑着时上限是 60vh（比官方那档多留一点）', body.style.maxHeight === 'min(400px, 60vh)', 'maxHeight = ' + body.style.maxHeight);
+  group.removeAttribute('data-group-expanded-mode');   // 这一轮跑完了，官方把组编起来了
+  body.style.maskImage = 'linear-gradient(to bottom, transparent 0, #000 24px 100%)';
+  env.scan();
+  check('轮结束时把内滚和淡出交还官方，高度仍是你调的值',
+    body.style.maxHeight === 'min(400px, 50vh)' && body.style.overflowAnchor === '' && body.style.maskImage === '',
+    JSON.stringify(body.style));
+}
+
+/* ---------------------- 性能：一帧只做一件事 ---------------------- */
+
+console.log('\n性能与流畅度：');
+
+{
+  // 流式正文每敲一个字都会来一条 characterData：它只该唤醒跟随，不该触发结构性扫描
+  const env = makeEnv({ groups: [{ turn: 'live', scrollHeight: 1200, clientHeight: 400 }] });
+  env.scan();
+  const before = env.api().stats().ticks;
+  for (let i = 0; i < 5; i += 1) env.mutate([{ type: 'characterData' }]);
+  env.flush(16);
+  const stats = env.api().stats();
+  check('流式字符变化 → 不重扫结构（ticks 不涨）', stats.ticks === before, 'ticks ' + before + ' → ' + stats.ticks);
+  check('流式字符变化 → 只叫醒跟随循环', stats.followWakes > 0, 'followWakes = ' + stats.followWakes);
+  check('跟随队列在结构扫描时重建好（每帧不再查 DOM）', stats.followBodies === 1, 'followBodies = ' + stats.followBodies);
+}
+
+{
+  // 结构性变化（增删节点 / data-state / aria-expanded）该扫还是要扫
+  const env = makeEnv({ turns: [{ open: false }] });
+  env.scan();
+  const before = env.api().stats().ticks;
+  env.mutate([{ type: 'childList' }]);
+  env.flush(16);
+  check('增删节点 → 下一帧重扫一次', env.api().stats().ticks === before + 1, 'ticks ' + before + ' → ' + env.api().stats().ticks);
+}
+
+{
+  // 缓动按 dt 换算：16.7ms 一帧吃掉 28% 剩余距离；8ms 一帧只吃掉约 14%（同一条曲线，不是同一比例）
+  function drop(dt) {
+    const env = makeEnv({ groups: [{ turn: 'live', scrollHeight: 1200, clientHeight: 400 }] });
+    env.scan();                    // 首帧钉底：scrollTop = 800
+    const [body] = env.processBodies;
+    env.flush(16);                 // 跑掉首帧，建立 lastFollowTs 基准
+    body.scrollHeight = 2800;      // 目标 2400 → 剩余距离 1600
+    env.flush(dt);
+    return body.scrollTop - 800;
+  }
+  const at60 = drop(16.7);
+  const at120 = drop(8);
+  check('60Hz 一帧走约 28% 的剩余距离', at60 > 400 && at60 < 500, '一帧走了 ' + Math.round(at60) + 'px');
+  check('120Hz（8ms 一帧）同一套缓动 → 一帧只走约一半', at120 > 150 && at120 < 250, '一帧走了 ' + Math.round(at120) + 'px');
+}
+
+{
+  // 追平后别再空烧 rAF：空转十几帧就停，等 DOM 变化再醒
+  const env = makeEnv({ groups: [{ turn: 'live', scrollHeight: 1200, clientHeight: 400 }] });
+  env.scan();
+  const [body] = env.processBodies;
+  for (let i = 0; i < 30; i += 1) env.flush(16);       // 追上 + 空转
+  const idle = env.api().stats().followFrames;
+  for (let i = 0; i < 5; i += 1) env.flush(16);
+  check('追平后停止空转（不再白跑帧）', env.api().stats().followFrames === idle, 'followFrames ' + idle + ' → ' + env.api().stats().followFrames);
+  body.scrollHeight = 2000;                            // 内容又长了
+  env.mutate([{ type: 'characterData' }]);             // 流式继续写
+  env.flush(16);
+  check('内容一长、字符一来 → 立刻恢复跟随', body.scrollTop > 800, 'scrollTop = ' + body.scrollTop);
+}
+
+{
+  const env = makeEnv({});
+  env.scan();
+  const state = env.api().state();
+  check('推荐默认值（面板「恢复默认」用的就是这套）',
+    state.followEase === 0.28 && state.collapseAnimMs === 200 && state.minLiveMs === 200
+      && state.cooldownMs === 260 && state.mergeDelayMs === 600
+      && state.thinkWindowMax === 400 && state.processWindowMax === 400,
+    JSON.stringify({
+      followEase: state.followEase, collapseAnimMs: state.collapseAnimMs, minLiveMs: state.minLiveMs,
+      cooldownMs: state.cooldownMs, mergeDelayMs: state.mergeDelayMs,
+    }));
+}
+
+{
+  const env = makeEnv({ groups: [{ turn: 'live', scrollHeight: 1200, clientHeight: 400 }] });
+  env.scan();
+  const [body] = env.processBodies;
+  env.api().set({ processWindowEnabled: false });
+  env.scan();
+  check('关掉「过程窗口」→ 不挂限高（跑着的一轮平铺）',
+    body.style.maxHeight === '' && body.style.overflowY === '' && body.style.overflowAnchor === '',
+    JSON.stringify(body.style));
+  check('诊断接口反映开关状态', env.api().windows().enabled === false && env.api().windows().max === 0,
+    JSON.stringify({ enabled: env.api().windows().enabled, max: env.api().windows().max }));
+  env.api().set({ processWindowEnabled: true });
+  env.scan();
+  check('再打开 → 记着的高度立刻回来', body.style.maxHeight === 'min(400px, 60vh)', 'maxHeight = ' + body.style.maxHeight);
+}
+
+{
+  // 「关掉时高度进度条不展示」—— 面板那一行是可选的，高度值要留着不能丢
+  const env = makeEnv({ groups: [{ turn: 'live', scrollHeight: 1200, clientHeight: 400 }] });
+  env.scan();
+  env.api().set({ processWindowMax: 600 });
+  env.scan();
+  const [body] = env.processBodies;
+  check('调高度到 600 → 立刻生效', body.style.maxHeight === 'min(600px, 60vh)', 'maxHeight = ' + body.style.maxHeight);
+  env.api().set({ processWindowEnabled: false });
+  check('关掉开关后高度值仍然记着（不归零）', env.api().state().processWindowMax === 600,
+    'processWindowMax = ' + env.api().state().processWindowMax);
+  env.api().set({ processWindowEnabled: true });
+  env.scan();
+  check('打开后用的还是 600，而不是回到 400', body.style.maxHeight === 'min(600px, 60vh)', 'maxHeight = ' + body.style.maxHeight);
 }
 
 if (failed === 0) {
