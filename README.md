@@ -10,13 +10,13 @@
 
 ---
 
-dsh-think-fold 是一个纯客户端插件。它做的事很窄：把「现在是哪一行在跑」这件事，比你早那么一点点交给官方自己的开合控件。
+dsh-think-fold is a client-side plugin with a narrow job: it watches for the row that is running and clicks the app's own disclosure control a moment earlier than you would. It renders nothing itself, so rows, code blocks and diffs stay the app's own, and uninstalling puts back the two official settings it changed.
 
-模型思考的时候展开那条思考行，跑工具的时候展开那张工具卡，工具跑完再收回成一行摘要。一轮结束，整轮的思考和命令并进官方那条「已完成 · 用时」。你手动开合过的行记下来，之后不再动它。
+中文：插件只做一件事 —— 盯住「现在是哪一行在跑」，然后比你早一点点去点官方自己的开合控件。
 
-没有自绘面板，没有自己的样式表，没有重新实现一遍 Markdown —— 排版、字号、代码块、diff、图片全部来自官方。对页面只有两处写操作：给官方的折叠行派发一次 `click`，以及按官方「已结束轮次」已经用过的方式给过程体加一个高度上限。哪个在跑，也完全读官方公布的状态，不看时钟、不做启发式。
+模型思考的时候展开那条思考行，开始跑工具的时候展开那张工具卡，跑完再收回成一行摘要。一轮结束，整轮的思考和命令并进官方那条「已完成 · 用时」。你手动开合过的行会被记下来，之后不再动。
 
-Rows the plugin did not open are never touched; rows you opened by hand get recorded and left alone. Uninstall puts the official settings it changed back where they were.
+排版、字号、代码块、diff、图片全部来自官方：没有自绘面板，也没有自己的样式表或 Markdown 实现。对页面只有两处写操作 —— 给官方折叠行派发一次 `click`，以及照官方「已结束轮次」已经用过的办法给过程体加一个高度上限。哪个在跑，同样只读官方公布的状态，不看时钟，不做启发式。
 
 ## 它做什么
 
