@@ -122,6 +122,11 @@ function makeEnv(options = {}) {
   for (const spec of options.groups ?? []) {
     const group = new El('div', { 'data-step-process': '', 'data-chat-turn': spec.turn ?? 'g' + processBodies.length }, flow);
     if (spec.live !== false) group.setAttribute('data-group-expanded-mode', '');
+    // 官方组标题：<button aria-expanded data-process-activity>（true = 你亲手展开过这一段）
+    new El('button', {
+      'data-process-activity': 'thinking',
+      'aria-expanded': spec.expanded === true ? 'true' : 'false',
+    }, group);
     const groupBody = new El('div', { 'data-step-process-body': '' }, group);
     groupBody.scrollHeight = spec.scrollHeight ?? 0;
     groupBody.clientHeight = spec.clientHeight ?? 0;
@@ -596,6 +601,93 @@ console.log('\n性能与流畅度：');
   env.api().set({ processWindowEnabled: true });
   env.scan();
   check('打开后用的还是 600，而不是回到 400', body.style.maxHeight === 'min(600px, 60vh)', 'maxHeight = ' + body.style.maxHeight);
+}
+
+{
+  // 一轮里被旁白切成两段（官方在每条回复处就 flush 当前过程组）：合并模式 = 两段共享同一份高度预算
+  const env = makeEnv({ groups: [
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+    { turn: 't1', scrollHeight: 900, clientHeight: 56 },
+  ] });
+  env.scan();
+  const [first, second] = env.processBodies;
+  check('合并：前面的段只留一条尾巴（56px）',
+    first.style.maxHeight === 'min(56px, 60vh)', 'first = ' + first.style.maxHeight);
+  check('合并：最下面那段拿走剩下的高度（400 - 56）',
+    second.style.maxHeight === 'min(344px, 60vh)', 'second = ' + second.style.maxHeight);
+  check('诊断接口能看到合并模式和每段的高度',
+    env.api().windows().merge === true
+      && env.api().windows().groups.map((g) => g.cap).join('|') === 'min(56px, 60vh)|min(344px, 60vh)',
+    JSON.stringify(env.api().windows().groups.map((g) => g.cap)));
+}
+
+{
+  // 三段：两条尾巴 + 剩下的都给最后一段（400 - 2*56 = 288）
+  const env = makeEnv({ groups: [
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+  ] });
+  env.scan();
+  const caps = env.processBodies.map((body) => body.style.maxHeight);
+  check('合并：三段 → 56 / 56 / 288', caps.join('|') === 'min(56px, 60vh)|min(56px, 60vh)|min(288px, 60vh)',
+    JSON.stringify(caps));
+}
+
+{
+  // 关掉合并 = 每段各开一个完整窗口（以前的行为）
+  const env = makeEnv({ groups: [
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+  ] });
+  env.scan();
+  env.api().set({ processWindowMerge: false });
+  env.scan();
+  const caps = env.processBodies.map((body) => body.style.maxHeight);
+  check('不合并：两段各拿一份完整高度', caps.join('|') === 'min(400px, 60vh)|min(400px, 60vh)', JSON.stringify(caps));
+  check('诊断接口反映不合并', env.api().windows().merge === false, JSON.stringify(env.api().windows().merge));
+  env.api().set({ processWindowMerge: true });
+  env.scan();
+  check('再打开合并 → 又变回一个窗口',
+    env.processBodies.map((body) => body.style.maxHeight).join('|') === 'min(56px, 60vh)|min(344px, 60vh)',
+    JSON.stringify(env.processBodies.map((body) => body.style.maxHeight)));
+}
+
+{
+  // 不同轮的各段不共享预算（每轮各有一份）
+  const env = makeEnv({ groups: [
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+    { turn: 't2', scrollHeight: 900, clientHeight: 400 },
+  ] });
+  env.scan();
+  const caps = env.processBodies.map((body) => body.style.maxHeight);
+  check('不同轮各拿一份完整高度（不跨轮合并）', caps.join('|') === 'min(400px, 60vh)|min(400px, 60vh)', JSON.stringify(caps));
+}
+
+{
+  // 预算太小时不合并（一条尾巴 + 一个最小窗口会超出预算，不如各按预算来）
+  const env = makeEnv({ groups: [
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+  ] });
+  env.scan();
+  env.api().set({ processWindowMax: 100 });
+  env.scan();
+  const caps = env.processBodies.map((body) => body.style.maxHeight);
+  check('预算 100px：小到不值得合并 → 两段都按 100px', caps.join('|') === 'min(100px, 60vh)|min(100px, 60vh)', JSON.stringify(caps));
+}
+
+{
+  // 你亲手展开过前面的段（官方 header 的 aria-expanded）→ 那一段不再压成尾巴，按完整窗口显示
+  const env = makeEnv({ groups: [
+    { turn: 't1', expanded: true, scrollHeight: 900, clientHeight: 400 },
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+  ] });
+  env.scan();
+  const caps = env.processBodies.map((body) => body.style.maxHeight);
+  check('展开过的那一段不再被压成尾巴', caps.join('|') === 'min(400px, 60vh)|min(344px, 60vh)', JSON.stringify(caps));
+  check('诊断接口能看到这一段被展开过', env.api().windows().groups[0].expanded === true,
+    JSON.stringify(env.api().windows().groups.map((g) => g.expanded)));
 }
 
 if (failed === 0) {

@@ -192,6 +192,17 @@ const CHECKS = [
     file: 'dsh-client-ui-chat',
     pattern: /const capped = grouped && \(!deferCompletedTurns \|\| \(shownCap \?\? closingCap\)\)/,
   },
+  // ---- 「多个过程段合并成一个窗口」靠的是这两条：段是按回复切开的，组标题能反映你展开过没有 ----
+  {
+    what: '每条回复节点都 flush 当前过程组（模型中途一说话就多一段过程）',
+    file: 'dsh-client-ui-chat',
+    pattern: /if \(reply\(node\)\) \{\s*flush\(true\);/,
+  },
+  {
+    what: '组标题是 aria-expanded={open} 的按钮（插件据此认出「你展开过这一段」）',
+    file: 'dsh-client-ui-chat',
+    pattern: /"aria-expanded": open,[\s\S]{0,80}?"aria-controls": bodyId/,
+  },
 ];
 
 const sources = new Map();
