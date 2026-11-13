@@ -723,6 +723,50 @@ console.log('\n性能与流畅度：');
     Object.keys(api.presets()).join(','));
 }
 
+{
+  // 「思考窗口高度」比「过程窗口高度」更矮时，要在过程窗口里再压一层。
+  // 以前只要行在过程窗口里就整段跳过，于是 640 / 400 这组设置在跑着的一轮里等于没写。
+  const env = makeEnv({ groups: [{ turn: 't1', scrollHeight: 2000, clientHeight: 640 }] });
+  env.scan();
+  const groupBody = env.processBodies[0];
+  const content = groupBody.querySelector('[data-step-process-content]');
+  const thinkRow = new El('div', { 'data-variant': 'think', 'data-state': 'running' }, content);
+  new El('div', { 'data-disclosure-row': '', 'aria-expanded': 'true' }, thinkRow);
+  const thinkBody = new El('div', {}, thinkRow);
+  thinkBody.scrollHeight = 1600;
+  thinkBody.clientHeight = 400;
+  env.scan();
+
+  env.api().set({ processWindowMax: 640, thinkWindowMax: 400 });
+  env.scan();
+  check('过程窗口按 640 压', groupBody.style.maxHeight === 'min(640px, 60vh)', groupBody.style.maxHeight);
+  check('思考窗口按 400 再压一层（不再被过程窗口吞掉）',
+    thinkBody.style.maxHeight === 'min(400px, 60vh)', thinkBody.style.maxHeight);
+
+  env.api().set({ thinkWindowMax: 640 });
+  env.scan();
+  check('一样高时不套第二层（一个窗口就够）', thinkBody.style.maxHeight === '', thinkBody.style.maxHeight);
+
+  env.api().set({ thinkWindowMax: 900 });
+  env.scan();
+  check('思考窗口比过程窗口更高时不套第二层', thinkBody.style.maxHeight === '', thinkBody.style.maxHeight);
+
+  env.api().set({ thinkWindowMax: 0 });
+  env.scan();
+  check('思考窗口设 0 = 不限高，不套', thinkBody.style.maxHeight === '', thinkBody.style.maxHeight);
+
+  env.api().set({ thinkWindowMax: 400, processWindowEnabled: false });
+  env.scan();
+  check('关掉过程窗口后，思考窗口回到自己压', thinkBody.style.maxHeight === 'min(400px, 60vh)',
+    thinkBody.style.maxHeight + ' / process=' + groupBody.style.maxHeight);
+
+  env.api().set({ processWindowEnabled: true, thinkWindowMax: 400 });
+  env.scan();
+  check('再打开过程窗口 → 又是 640 / 400 两层', groupBody.style.maxHeight === 'min(640px, 60vh)'
+    && thinkBody.style.maxHeight === 'min(400px, 60vh)',
+    groupBody.style.maxHeight + ' / ' + thinkBody.style.maxHeight);
+}
+
 if (failed === 0) {
   console.log('\n全部 ' + (passed) + ' 条通过：合并整轮的判断逻辑符合预期。');
   process.exit(0);
