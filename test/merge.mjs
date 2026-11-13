@@ -690,6 +690,39 @@ console.log('\n性能与流畅度：');
     JSON.stringify(env.api().windows().groups.map((g) => g.expanded)));
 }
 
+{
+  // 三档「折叠力度」：只动数值、不动开关；手调一个滑杆就变「自定义」
+  const env = makeEnv({});
+  env.scan();
+  const api = env.api();
+  check('默认设置 = 标准档', api.preset() === 'standard', api.preset());
+
+  api.setPreset('calm');
+  check('安静档：窗口 320 / 收起 120ms',
+    api.state().processWindowMax === 320 && api.state().collapseAnimMs === 120,
+    api.state().processWindowMax + ' / ' + api.state().collapseAnimMs);
+  check('安静档：预设名跟着变', api.preset() === 'calm', api.preset());
+
+  api.setPreset('lively');
+  check('放开档：窗口 640 / 收起 260ms',
+    api.state().processWindowMax === 640 && api.state().collapseAnimMs === 260,
+    api.state().processWindowMax + ' / ' + api.state().collapseAnimMs);
+
+  api.set({ processWindowMax: 500 });
+  check('手调一个滑杆 → 变自定义', api.preset() === 'custom', api.preset());
+
+  api.setPreset('standard');
+  check('点回标准 → 又整组匹配', api.preset() === 'standard', api.preset());
+
+  api.set({ mergeTurns: false });
+  check('只关开关不算改档位', api.preset() === 'standard', api.preset());
+
+  const kept = api.setPreset('nope');
+  check('未知档位名不会打乱设置', kept === 'standard' && api.preset() === 'standard', String(kept));
+  check('presets() 给出三档', Object.keys(api.presets()).join(',') === 'calm,standard,lively',
+    Object.keys(api.presets()).join(','));
+}
+
 if (failed === 0) {
   console.log('\n全部 ' + (passed) + ' 条通过：合并整轮的判断逻辑符合预期。');
   process.exit(0);
