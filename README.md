@@ -47,22 +47,25 @@
 我们只把「你调的高度」继续挂着，上限换成官方的 `50vh`；然后才是「一轮跑完并成一条」那层接管。
 
 面板里「过程窗口高度」默认 **400**（跟官方同款），0 = 不限高；控制台 `__dshThinkFold.windows()`
-能看到每一组的 `expandedMode / expanded / capped / height / offset / floor`（`offset === floor` 就是已贴底）。
+能看到每一组的 `expandedMode / expanded / capped / flowing / height / offset / floor`（`offset === floor` 就是已贴底）。
 
 ### 一轮里有好几段过程的时候
 
 模型中途说一句话，官方就把过程**切成新的一段**：`TurnGroups.rebuild` 在每条回复节点上就 `flush(true)` 当前组
 （`if (reply(node)) { flush(true); emit(key, { kind: "node", key, groupPart: "response" }); }`），
-于是「旁白 → 又继续跑」在 DOM 里是**两个并排的过程组**，各自一个 `[data-step-process-body]`。
-这套结构改不了（每个组都是 React 自己的节点，本插件不做 DOM 手术），所以合并只能做到"只显示一个"：
+于是「旁白 → 又继续跑」在 DOM 里是**两个并排的过程组**，各自一个 `[data-step-process-body]`——
+注意那句旁白本身就是组里的内容，藏在组里，不是单独的节点。
+这套结构改不了（每个组都是 React 自己的节点，本插件不做 DOM 手术），所以合并做的是"只有一个窗口，
+但一个字都不藏"：
 
-- **只留一个过程窗口（默认）** —— 一轮里只有最下面那段是窗口（用「过程窗口高度」这一份高度）；
-  前面各段**整段收起**，只剩官方那一行组标题（「已完成 · N 项过程 · 用时」）。
-  一轮在屏幕上看起来就只有一个窗口，段数再多也不会往下长。
-- **关掉 = 每段独立** —— 每段各开一个完整窗口，段数一多页面就明显变长。
+- **只留一个过程窗口（默认）** —— 一轮里只有**最下面那段**是窗口（用「过程窗口高度」这一份高度，
+  自己滚到最新）；前面各段**按自然高度流着**：输出（旁白）、工具行、思考行都原样显示，只是不压高度、
+  不内滚，组标题那一行收起来，所以看不出"一段一段"的分界。页面上滚动条只有一条，内容一样不少。
+- **关掉 = 每段独立** —— 每段各开一个完整窗口，段数一多页面就明显变长、还多出几条内部滚动条。
 
-想细看前面某一段：点它自己的组标题（`[data-process-activity]` 那个按钮，`aria-expanded` 会变 true），
-这一段就按完整窗口显示出来；再点一下收回。整轮跑完之后所有段自动恢复，不会留下永久隐藏的段落。
+想细看前面某一段：它就在页面上流着，直接滚过去看即可；那个组标题平时收起来了，所以不会挡住内容。
+你如果亲手把某一段的组标题点开过（`[data-process-activity]` 的 `aria-expanded=true`），
+那一段就改按完整窗口显示，不会被我们改成自然流。整轮跑完之后所有段自动恢复官方行为。
 
 ## 一轮跑完并成一条
 
@@ -238,7 +241,7 @@ __dshThinkFold.set({
 })
 
 __dshThinkFold.merge()      // 合并相关的实时状态：官方档位 official / foldedReplies、folding / finalOnly、开关、每一轮的首行（open / disabled / queued / owned）
-__dshThinkFold.windows()    // 过程窗口 / 思考窗口：enabled、max、merge、每组 {expandedMode, expanded, capped, hidden, height, offset, floor}
+__dshThinkFold.windows()    // 过程窗口 / 思考窗口：enabled、max、merge、每组 {expandedMode, expanded, capped, flowing, headerHidden, height, offset, floor}
 __dshThinkFold.stats()      // 性能计数：ticks（结构性扫描次数）/ followFrames / followWakes / avgTickMs / avgFollowMs
 __dshThinkFold.setMerge(false)   // 关掉整轮合并（会把插件动过的两个官方设置都还原）
 
@@ -362,7 +365,8 @@ $env:DSH_APP_DIR = "D:/path/to/resources/app"     # 或：从 app.asar 解包后
 - 窗口高度写的是 `min(<你的值>px, 60vh)`：屏幕矮的时候按 60vh 走，不会超过半屏多一点。
 - **模型中途说话会把过程切成多段**（官方 `TurnGroups.rebuild` 在每条回复节点上就 `flush` 当前组），
   各段是 flow 里彼此独立的 React 节点，不能真的塞进同一个滚动条；所以「只留一个过程窗口」的做法是
-  **把前面各段整段收起**（只剩一行组标题，点标题能展开它），不是字面意义上的一整个滚动容器。
+  **前面各段按自然高度流着、只有最下面那段是窗口**（内容一个字都不藏，组标题收起来），
+  不是字面意义上的"一个包裹整轮的滚动容器"。
 - 官方搜索（Ctrl+F）折叠起来的内容不点。
 - **整轮合并的第二层（点首行）是"点一下就收"，没有高度过渡**：官方被折掉的行是直接挂 `hidden` 的，
   成员行是彼此独立的 seat，没有统一 wrapper 可以量高度做动画（官方自己也是瞬收）。
