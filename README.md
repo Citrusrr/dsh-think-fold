@@ -39,7 +39,8 @@
    首次挂上直接把 `scrollTop` 钉到底，不从开头慢慢滚。
 2. **窗口内逐帧跟随**：复用思考窗口那套 `followLoop`（每帧自持、直接读最新 `scrollHeight`、`followEase` 比例 + 最小 1.2px，
    差 2px 以内直接贴底）。你手动往上滚就暂停，滚回底部自动恢复。上下边缘按官方同款 24px 渐变淡出。
-3. **不套第二层**：已经在过程窗口里的思考行不再单独开思考窗口（`insideCappedProcess()`），一个窗口就够。
+3. **思考窗口只在你设得更矮时才套**：过程窗口已经更紧时不再套第二层（`thinkWindowWorth()`）；
+   反过来「思考窗口高度」比过程窗口更矮，就在过程窗口里再压一层。
 
 轮一旦结束，`data-group-expanded-mode` 消失 → 滚动、淡出、跟随**当场交还官方**
 （它自己的 class 会给 `overflow-y:auto` 和 `fadeTop/fadeBottom`，也有自己的跟随），
@@ -53,15 +54,15 @@
 模型中途说一句话，官方就把过程**切成新的一段**：`TurnGroups.rebuild` 在每条回复节点上就 `flush(true)` 当前组
 （`if (reply(node)) { flush(true); emit(key, { kind: "node", key, groupPart: "response" }); }`），
 于是「旁白 → 又继续跑」在 DOM 里是**两个并排的过程组**，各自一个 `[data-step-process-body]`。
-这套结构改不了（每个组都是 React 自己的节点，本插件不做 DOM 手术），所以这里按**高度预算**来合并：
+这套结构改不了（每个组都是 React 自己的节点，本插件不做 DOM 手术），所以合并只能做到"只显示一个"：
 
-- **多个过程段：合并（默认）** —— 同一轮（同一个 `data-chat-turn`）的各段**共享**「过程窗口高度」这一份预算：
-  前面的段只留 **56px** 一条尾巴（仍然可滚，停在它自己的最后几行），最下面那段拿走剩下的全部（不少于 140px）。
-  整轮总高 ≈ 你调的那个高度，段数再多也不会一直往下长。
-- **关掉 = 每段独立** —— 回到以前的行为：每段各开一个完整窗口，段数一多页面就明显变长。
+- **只留一个过程窗口（默认）** —— 一轮里只有最下面那段是窗口（用「过程窗口高度」这一份高度）；
+  前面各段**整段收起**，只剩官方那一行组标题（「已完成 · N 项过程 · 用时」）。
+  一轮在屏幕上看起来就只有一个窗口，段数再多也不会往下长。
+- **关掉 = 每段独立** —— 每段各开一个完整窗口，段数一多页面就明显变长。
 
-想细看前面的某一段：点它自己的组标题（`[data-process-activity]` 那个按钮，`aria-expanded` 会变 true），
-这一段就不再压成尾巴、按完整窗口显示；再点一下收回。预算小到不值得合并（< 196px）时自动按每段独立来。
+想细看前面某一段：点它自己的组标题（`[data-process-activity]` 那个按钮，`aria-expanded` 会变 true），
+这一段就按完整窗口显示出来；再点一下收回。整轮跑完之后所有段自动恢复，不会留下永久隐藏的段落。
 
 ## 一轮跑完并成一条
 
@@ -177,7 +178,7 @@ plugin_manager(remove_bundle, "dsh-think-fold")
 | 组 | 项 |
 |---|---|
 | 节奏 | 合并延迟、收起延迟、收起过渡、淡出程度、最短展开时长 |
-| 窗口 | 过程窗口高度、多个过程段合并、思考窗口高度、跟随平滑度 |
+| 窗口 | 过程窗口高度、只留一个过程窗口、思考窗口高度、跟随平滑度 |
 | 范围 | 工具卡、提问卡、保留最近几条、滚动补偿 |
 
 两个让人觉得"这东西是为我做的"的小地方：滑杆两端写的是人话刻度（瞬间 ←→ 慢、不淡 ←→
@@ -226,7 +227,7 @@ __dshThinkFold.set({
   thinkWindowMax: 400,      // 长思考压成内滚窗口（px）；0 = 不限高，思考很长时页面会一直滚
   processWindowEnabled: true, // 跑着的那一轮收进过程窗口；false = 平铺（高度值仍记着）
   processWindowMax: 400,    // 过程窗口最多这么高（px）；0 = 不限高
-  processWindowMerge: true, // 一轮被旁白切成几段时合并成一个窗口（共用这份高度）；false = 每段各一个
+  processWindowMerge: true, // 一轮被旁白切成几段时只留一个窗口（前面的段整段收起）；false = 每段各一个
   followEase: 0.28,         // 跟随平滑度：每 1/60 秒吃掉剩余距离的比例（已按帧率换算，60/120Hz 手感一致）
   includeTools: true,       // 工具卡是否参与（关掉 = 只做思考行）
   includeQuestions: false,  // LLM 提问卡 ask_user_question 是否参与
@@ -237,7 +238,7 @@ __dshThinkFold.set({
 })
 
 __dshThinkFold.merge()      // 合并相关的实时状态：官方档位 official / foldedReplies、folding / finalOnly、开关、每一轮的首行（open / disabled / queued / owned）
-__dshThinkFold.windows()    // 过程窗口 / 思考窗口：enabled、max、merge、每组 {expandedMode, expanded, capped, height, offset, floor}
+__dshThinkFold.windows()    // 过程窗口 / 思考窗口：enabled、max、merge、每组 {expandedMode, expanded, capped, hidden, height, offset, floor}
 __dshThinkFold.stats()      // 性能计数：ticks（结构性扫描次数）/ followFrames / followWakes / avgTickMs / avgFollowMs
 __dshThinkFold.setMerge(false)   // 关掉整轮合并（会把插件动过的两个官方设置都还原）
 
@@ -360,8 +361,8 @@ $env:DSH_APP_DIR = "D:/path/to/resources/app"     # 或：从 app.asar 解包后
   区别只是跑着时滚动、淡出、跟随由插件做（上限 `60vh`），结束后全部交还官方（上限 `50vh`）。
 - 窗口高度写的是 `min(<你的值>px, 60vh)`：屏幕矮的时候按 60vh 走，不会超过半屏多一点。
 - **模型中途说话会把过程切成多段**（官方 `TurnGroups.rebuild` 在每条回复节点上就 `flush` 当前组），
-  各段是 flow 里彼此独立的 React 节点、不能真的塞进同一个滚动条；「多个过程段：合并」用的是
-  **共享高度预算**（前面的段压成 56px 尾巴），不是字面意义上的一整个滚动容器。
+  各段是 flow 里彼此独立的 React 节点，不能真的塞进同一个滚动条；所以「只留一个过程窗口」的做法是
+  **把前面各段整段收起**（只剩一行组标题，点标题能展开它），不是字面意义上的一整个滚动容器。
 - 官方搜索（Ctrl+F）折叠起来的内容不点。
 - **整轮合并的第二层（点首行）是"点一下就收"，没有高度过渡**：官方被折掉的行是直接挂 `hidden` 的，
   成员行是彼此独立的 seat，没有统一 wrapper 可以量高度做动画（官方自己也是瞬收）。

@@ -604,34 +604,37 @@ console.log('\n性能与流畅度：');
 }
 
 {
-  // 一轮里被旁白切成两段（官方在每条回复处就 flush 当前过程组）：合并模式 = 两段共享同一份高度预算
+  // 一轮里被旁白切成两段（官方在每条回复处就 flush 当前过程组）：合并模式 = 只留一个窗口
   const env = makeEnv({ groups: [
     { turn: 't1', scrollHeight: 900, clientHeight: 400 },
-    { turn: 't1', scrollHeight: 900, clientHeight: 56 },
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
   ] });
   env.scan();
   const [first, second] = env.processBodies;
-  check('合并：前面的段只留一条尾巴（56px）',
-    first.style.maxHeight === 'min(56px, 60vh)', 'first = ' + first.style.maxHeight);
-  check('合并：最下面那段拿走剩下的高度（400 - 56）',
-    second.style.maxHeight === 'min(344px, 60vh)', 'second = ' + second.style.maxHeight);
-  check('诊断接口能看到合并模式和每段的高度',
+  check('合并：前面的段整段收起（display:none）',
+    first.style.display === 'none' && !first.style.maxHeight,
+    'display = ' + JSON.stringify(first.style.display) + ' maxHeight = ' + JSON.stringify(first.style.maxHeight));
+  check('合并：只剩最下面那一段是窗口，拿满高度',
+    second.style.maxHeight === 'min(400px, 60vh)' && second.style.display !== 'none',
+    'second = ' + second.style.maxHeight);
+  check('诊断接口能看到哪一段被收起',
     env.api().windows().merge === true
-      && env.api().windows().groups.map((g) => g.cap).join('|') === 'min(56px, 60vh)|min(344px, 60vh)',
-    JSON.stringify(env.api().windows().groups.map((g) => g.cap)));
+      && env.api().windows().groups.map((g) => g.hidden).join('|') === 'true|false'
+      && env.api().windows().groups[1].cap === 'min(400px, 60vh)',
+    JSON.stringify(env.api().windows().groups.map((g) => [g.hidden, g.cap])));
 }
 
 {
-  // 三段：两条尾巴 + 剩下的都给最后一段（400 - 2*56 = 288）
+  // 三段：前两段收起，最后一段拿满
   const env = makeEnv({ groups: [
     { turn: 't1', scrollHeight: 900, clientHeight: 400 },
     { turn: 't1', scrollHeight: 900, clientHeight: 400 },
     { turn: 't1', scrollHeight: 900, clientHeight: 400 },
   ] });
   env.scan();
-  const caps = env.processBodies.map((body) => body.style.maxHeight);
-  check('合并：三段 → 56 / 56 / 288', caps.join('|') === 'min(56px, 60vh)|min(56px, 60vh)|min(288px, 60vh)',
-    JSON.stringify(caps));
+  const shown = env.processBodies.map((body) => body.style.display === 'none' ? 'hidden' : body.style.maxHeight);
+  check('合并：三段 → 收起 / 收起 / 一个窗口',
+    shown.join('|') === 'hidden|hidden|min(400px, 60vh)', JSON.stringify(shown));
 }
 
 {
@@ -645,16 +648,20 @@ console.log('\n性能与流畅度：');
   env.scan();
   const caps = env.processBodies.map((body) => body.style.maxHeight);
   check('不合并：两段各拿一份完整高度', caps.join('|') === 'min(400px, 60vh)|min(400px, 60vh)', JSON.stringify(caps));
+  check('不合并：两段都没有被收起',
+    env.processBodies.every((body) => body.style.display !== 'none'),
+    JSON.stringify(env.processBodies.map((body) => body.style.display)));
   check('诊断接口反映不合并', env.api().windows().merge === false, JSON.stringify(env.api().windows().merge));
   env.api().set({ processWindowMerge: true });
   env.scan();
   check('再打开合并 → 又变回一个窗口',
-    env.processBodies.map((body) => body.style.maxHeight).join('|') === 'min(56px, 60vh)|min(344px, 60vh)',
-    JSON.stringify(env.processBodies.map((body) => body.style.maxHeight)));
+    env.processBodies.map((body) => body.style.display === 'none' ? 'hidden' : body.style.maxHeight).join('|')
+      === 'hidden|min(400px, 60vh)',
+    JSON.stringify(env.processBodies.map((body) => [body.style.display, body.style.maxHeight])));
 }
 
 {
-  // 不同轮的各段不共享预算（每轮各有一份）
+  // 不同轮的各段互不影响（每轮各留自己的一个窗口）
   const env = makeEnv({ groups: [
     { turn: 't1', scrollHeight: 900, clientHeight: 400 },
     { turn: 't2', scrollHeight: 900, clientHeight: 400 },
@@ -665,7 +672,7 @@ console.log('\n性能与流畅度：');
 }
 
 {
-  // 预算太小时不合并（一条尾巴 + 一个最小窗口会超出预算，不如各按预算来）
+  // 高度预算调小也一样：只留一个窗口，前面的段收起（不再有「预算太小就不合并」这回事）
   const env = makeEnv({ groups: [
     { turn: 't1', scrollHeight: 900, clientHeight: 400 },
     { turn: 't1', scrollHeight: 900, clientHeight: 400 },
@@ -673,21 +680,40 @@ console.log('\n性能与流畅度：');
   env.scan();
   env.api().set({ processWindowMax: 100 });
   env.scan();
-  const caps = env.processBodies.map((body) => body.style.maxHeight);
-  check('预算 100px：小到不值得合并 → 两段都按 100px', caps.join('|') === 'min(100px, 60vh)|min(100px, 60vh)', JSON.stringify(caps));
+  const shown = env.processBodies.map((body) => body.style.display === 'none' ? 'hidden' : body.style.maxHeight);
+  check('预算 100px：仍然是收起 / 一个 100px 窗口',
+    shown.join('|') === 'hidden|min(100px, 60vh)', JSON.stringify(shown));
 }
 
 {
-  // 你亲手展开过前面的段（官方 header 的 aria-expanded）→ 那一段不再压成尾巴，按完整窗口显示
+  // 你亲手展开过前面的段（官方 header 的 aria-expanded）→ 那一段照常显示完整窗口
   const env = makeEnv({ groups: [
     { turn: 't1', expanded: true, scrollHeight: 900, clientHeight: 400 },
     { turn: 't1', scrollHeight: 900, clientHeight: 400 },
   ] });
   env.scan();
   const caps = env.processBodies.map((body) => body.style.maxHeight);
-  check('展开过的那一段不再被压成尾巴', caps.join('|') === 'min(400px, 60vh)|min(344px, 60vh)', JSON.stringify(caps));
+  check('展开过的那一段不再被收起', caps.join('|') === 'min(400px, 60vh)|min(400px, 60vh)', JSON.stringify(caps));
   check('诊断接口能看到这一段被展开过', env.api().windows().groups[0].expanded === true,
     JSON.stringify(env.api().windows().groups.map((g) => g.expanded)));
+}
+
+{
+  // 一轮跑完 → 被收起的段落要还原（不能留成永久 display:none）
+  const env = makeEnv({ groups: [
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+    { turn: 't1', scrollHeight: 900, clientHeight: 400 },
+  ] });
+  env.scan();
+  check('跑着的时候第一段是收起的', env.processBodies[0].style.display === 'none',
+    JSON.stringify(env.processBodies[0].style.display));
+  env.processBodies.forEach((body) => body.parentElement.removeAttribute('data-group-expanded-mode'));
+  env.scan();
+  check('这一轮结束后第一段被放出来（不再 display:none）',
+    env.processBodies[0].style.display !== 'none', JSON.stringify(env.processBodies[0].style.display));
+  check('结束后两段都回到你调的高度',
+    env.processBodies.map((body) => body.style.maxHeight).join('|') === 'min(400px, 50vh)|min(400px, 50vh)',
+    JSON.stringify(env.processBodies.map((body) => body.style.maxHeight)));
 }
 
 {
